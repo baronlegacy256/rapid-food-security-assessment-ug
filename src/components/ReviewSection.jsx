@@ -11,6 +11,10 @@ const ReviewSection = ({ formData, sections }) => {
 
         // Crop Check (Proxy: Normal Year Events or Crop Performance)
         const hasCropData = Object.keys(formData.normalYearEvents).length > 0 || Object.keys(formData.cropPerformance).length > 0;
+        // Check if diseaseOutbreaks is properly filled (either 'no' or 'yes' with data)
+        const hasOutbreakData = formData.diseaseOutbreaks?.hasOutbreak === 'no' ||
+            (formData.diseaseOutbreaks?.hasOutbreak === 'yes' && Object.keys(formData.diseaseOutbreaks).length > 1);
+
         if (!hasCropData) {
             missing.push({ id: 'crop', name: 'Crop Production', reason: 'No data entered' });
         }
@@ -23,7 +27,13 @@ const ReviewSection = ({ formData, sections }) => {
 
         // Fisheries Check
         const hasFisheriesData = formData.fishingHouseholds || formData.waterBodies !== '';
-        if (!hasFisheriesData) {
+        // If waterBodies is 'no', we don't need fishCatch/fishUtilization data
+        const needsWaterBodyData = formData.waterBodies === 'yes';
+        const hasWaterBodyData = needsWaterBodyData ?
+            (Object.keys(formData.fishCatch).length > 0 || Object.keys(formData.fishUtilization).length > 0) :
+            true; // Not needed if no water bodies
+
+        if (!hasFisheriesData || !hasWaterBodyData) {
             missing.push({ id: 'fisheries', name: 'Fisheries', reason: 'No data entered' });
         }
 

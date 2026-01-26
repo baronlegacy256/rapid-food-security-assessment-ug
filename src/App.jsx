@@ -79,20 +79,62 @@ const FoodSecurityAssessment = () => {
     if (!sectionId || !sectionFields[sectionId]) return 0;
     const fields = sectionFields[sectionId];
     let filledCount = 0;
+    let totalFields = fields.length;
 
-    fields.forEach(field => {
-      const value = formData[field];
-      if (value && typeof value === 'object') {
-        // For objects/sets, check if they have any non-empty values
-        if (Object.values(value).some(v => v !== '' && v !== null && v !== false)) {
+    // Handle conditional fields for fisheries section
+    if (sectionId === 'fisheries' && formData.waterBodies === 'no') {
+      // If no water bodies, exclude fishCatch and fishUtilization from calculation
+      const conditionalFields = ['fishCatch', 'fishUtilization'];
+      totalFields = fields.filter(f => !conditionalFields.includes(f)).length;
+
+      fields.forEach(field => {
+        // Skip conditional fields when water bodies = no
+        if (conditionalFields.includes(field)) return;
+
+        const value = formData[field];
+        if (value && typeof value === 'object') {
+          if (Object.values(value).some(v => v !== '' && v !== null && v !== false)) {
+            filledCount++;
+          }
+        } else if (value && value !== '') {
           filledCount++;
         }
-      } else if (value && value !== '') {
-        filledCount++;
-      }
-    });
+      });
+    } else if (sectionId === 'crop') {
+      // Handle conditional diseaseOutbreaks field
+      fields.forEach(field => {
+        const value = formData[field];
+        if (field === 'diseaseOutbreaks') {
+          // Consider it filled if hasOutbreak is set to 'no' (no details needed)
+          // or if hasOutbreak is 'yes' and there's outbreak data
+          if (value?.hasOutbreak === 'no' ||
+            (value?.hasOutbreak === 'yes' && Object.keys(value).length > 1)) {
+            filledCount++;
+          }
+        } else if (value && typeof value === 'object') {
+          if (Object.values(value).some(v => v !== '' && v !== null && v !== false)) {
+            filledCount++;
+          }
+        } else if (value && value !== '') {
+          filledCount++;
+        }
+      });
+    } else {
+      // Standard calculation for other sections
+      fields.forEach(field => {
+        const value = formData[field];
+        if (value && typeof value === 'object') {
+          // For objects/sets, check if they have any non-empty values
+          if (Object.values(value).some(v => v !== '' && v !== null && v !== false)) {
+            filledCount++;
+          }
+        } else if (value && value !== '') {
+          filledCount++;
+        }
+      });
+    }
 
-    return Math.round((filledCount / fields.length) * 100);
+    return Math.round((filledCount / totalFields) * 100);
   };
 
   const sections = userRole === 'owner'
