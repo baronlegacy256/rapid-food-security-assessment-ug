@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { LogIn, Loader2 } from 'lucide-react';
 import { useToast } from './ToastProvider';
@@ -15,16 +15,26 @@ const Auth = ({ onLogin }) => {
     const [isSignUp, setIsSignUp] = useState(false);
     const [error, setError] = useState(null);
 
+    // Keep district-link token across auth redirects
+    useEffect(() => {
+        const token = new URLSearchParams(window.location.search).get('token');
+        if (token) sessionStorage.setItem('district_link_token', token);
+    }, []);
+
     const handleAuth = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
 
         try {
+            const currentUrl = window.location.href;
             if (isSignUp) {
                 const { data, error } = await supabase.auth.signUp({
                     email,
                     password,
+                    options: {
+                        emailRedirectTo: currentUrl,
+                    },
                 });
                 if (error) throw error;
                 info('Check your email for the login link!');
@@ -44,8 +54,12 @@ const Auth = ({ onLogin }) => {
 
     const handleGoogleLogin = async () => {
         try {
+            const currentUrl = window.location.href;
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
+                options: {
+                    redirectTo: currentUrl,
+                },
             })
             if (error) throw error;
         } catch (error) {
@@ -176,16 +190,7 @@ const Auth = ({ onLogin }) => {
                     </div>
                 </div>
 
-                <div className="mt-12">
-                    <div className="flex flex-col items-center gap-6">
-                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-2">Partner Organizations</p>
-                        <div className="flex items-center gap-10 opacity-60 hover:opacity-100 transition-opacity duration-500 grayscale hover:grayscale-0">
-                            <img src={faoLogo} alt="FAO" className="h-12 w-auto" />
-                            <img src={wfpLogo} alt="WFP" className="h-12 w-auto" />
-                            <img src={worldBankLogo} alt="World Bank" className="h-12 w-auto" />
-                        </div>
-                    </div>
-                </div>
+
             </div>
         </div>
     );

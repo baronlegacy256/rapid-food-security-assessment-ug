@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
-import { ChevronRight, ChevronLeft, Save, CheckCircle2, Circle, User, LogOut, Settings, Bell, ChevronDown, Loader2, LayoutGrid, ClipboardList, Menu, X, Home, Users } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Save, CheckCircle2, Circle, User, LogOut, Settings, Bell, ChevronDown, Loader2, LayoutGrid, ClipboardList, Menu, X, Home, Users, Database } from 'lucide-react';
 import IntroSection from './components/IntroSection';
 import CropSection from './components/CropSection';
 import LivestockSection from './components/LivestockSection';
@@ -10,23 +10,60 @@ import ReviewSection from './components/ReviewSection';
 import Auth from './components/Auth';
 import TeamManager from './components/TeamManager';
 import Profile from './components/Profile';
+import AdminDashboard from './components/AdminDashboard';
+import AdminPanel from './pages/AdminPanel';
 import faoLogo from './assets/fao-logo.svg';
 import wfpLogo from './assets/wfp-logo.png';
 import worldBankLogo from './assets/world-bank-logo.png';
 import coatOfArms from './assets/uganda-coat-of-arms.png';
 import { useToast } from './components/ToastProvider.jsx';
+import { getCurrentReportingPeriod, REPORTING_CONFIG, formatReportingPeriod } from './utils/reportingPeriods';
 
 const FoodSecurityAssessment = () => {
   const { success, error } = useToast();
   const [session, setSession] = useState(null);
   const [loadingSession, setLoadingSession] = useState(true);
-  const [currentView, setCurrentView] = useState('assessment'); // 'assessment', 'team', 'profile'
+  const [currentView, setCurrentView] = useState('assessment'); // 'assessment', 'team', 'profile', 'admin'
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [isSystemAdmin, setIsSystemAdmin] = useState(false);
+
+  // Define allowed admin emails from environment variables
+  const SYSTEM_ADMIN_EMAILS = [
+    'admin@foodsecurity.ug',
+    'system.admin@kobbo.co',
+    'aaronbaraka292@gmail.com',
+    ...(import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean)
+  ];
+
+  // Check URL for admin route
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path === '/admin' || path.startsWith('/admin/')) {
+      setIsAdminMode(true);
+    }
+  }, []);
+
+  const enterAdminMode = () => {
+    setIsAdminMode(true);
+    window.history.pushState({}, '', '/admin');
+  };
+
+  const exitAdminMode = () => {
+    setIsAdminMode(false);
+    window.history.pushState({}, '', '/');
+    setCurrentView('assessment');
+  };
+
+  // Reporting Period State
+  const [reportingInfo, setReportingInfo] = useState(() => getCurrentReportingPeriod(REPORTING_CONFIG.defaultFrequency));
 
   // Collaboration State
   const [activeAssessmentId, setActiveAssessmentId] = useState(null);
   const [userRole, setUserRole] = useState('owner');
   const [notifications, setNotifications] = useState([]);
   const [pendingInvite, setPendingInvite] = useState(null);
+  const [linkStatus, setLinkStatus] = useState(null); // null | 'processing' | 'ready' | 'error'
+  const [linkError, setLinkError] = useState('');
 
   const [currentSection, setCurrentSection] = useState(0);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -37,6 +74,14 @@ const FoodSecurityAssessment = () => {
   const notificationRef = useRef(null);
   const userMenuRef = useRef(null);
   const isCreatingAssessmentRef = useRef(false);
+
+  // Persist district-link token across auth redirects (OAuth/email links may drop query params).
+  const urlToken = new URLSearchParams(window.location.search).get('token');
+  if (urlToken) {
+    sessionStorage.setItem('district_link_token', urlToken);
+  }
+
+  const [linkedDistrict, setLinkedDistrict] = useState(null);
 
   const [formData, setFormData] = useState({
     statisticalRegion: '',
@@ -50,13 +95,91 @@ const FoodSecurityAssessment = () => {
     subCountyRanking: {}, affectedParishes: {}, foodSecurityRanking: {},
     productionConstraints: {}, diseaseOutbreaks: {}, copingStrategies: {},
     livestockConditions: {}, livestockNumbers: {}, livestockMigration: {},
-    livestockMarket: {}, livestockDiseases: {}, livestockInterventions: {},
+    livestockMarketConditions: {}, livestockOutbreaks: {}, livestockInterventions: {},
     drugAvailability: '', milkProduction: {}, waterSources: {},
     fishingHouseholds: '', fishingActivityChange: {}, waterBodies: '',
     fishCatch: {}, fishUtilization: {}, fishPonds: {}, stockedPonds: '',
     fishSpecies: {}, aquacultureHarvest: {}, fishingChallenges: '',
-    marketAssessments: {}
+    markets: []
   });
+
+  const createOrGetDraftAssessment = async (userId) => {
+    if (isCreatingAssessmentRef.current || activeAssessmentId) return;
+    isCreatingAssessmentRef.current = true;
+
+    try {
+      // 1. Try to find an existing assessment for this SPECIFIC period
+      const { data, error: fetchError } = await supabase
+        .from('assessments')
+        .select('id, submission_data')
+        .eq('user_id', userId)
+        .eq('reporting_year', reportingInfo.year)
+        .eq('reporting_period', reportingInfo.period)
+        .maybeSingle();
+
+      // If 'reporting_year' column doesn't exist yet, fetchError will be present
+      // In that case, we fallback to the old method (fetch latest)
+      if (fetchError && fetchError.message?.includes("column")) {
+        console.warn("Reporting columns not found, falling back to legacy mode");
+        const { data: legacyData } = await supabase
+          .from('assessments')
+          .select('id, submission_data')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (legacyData) {
+          setActiveAssessmentId(legacyData.id);
+          if (legacyData.submission_data) setFormData(prev => ({ ...prev, ...legacyData.submission_data }));
+          return;
+        }
+      }
+
+      if (data) {
+        setActiveAssessmentId(data.id);
+        if (data.submission_data) setFormData(prev => ({ ...prev, ...data.submission_data }));
+      } else {
+        // 2. Create new assessment for this period
+        const newAssessmentData = {
+          user_id: userId,
+          submission_data: {},
+          // We include these fields, but if the migration hasn't run, the insert might fail if we're not careful
+          // However, Supabase/Postgres will error if we try to insert into non-existent columns
+          // So we try-catch the insert
+        };
+
+        try {
+          const { data: newAssessment, error: insertError } = await supabase
+            .from('assessments')
+            .insert([{
+              ...newAssessmentData,
+              reporting_year: reportingInfo.year,
+              reporting_period: reportingInfo.period,
+              reporting_frequency: REPORTING_CONFIG.defaultFrequency
+            }])
+            .select()
+            .single();
+
+          if (insertError) throw insertError;
+          if (newAssessment) setActiveAssessmentId(newAssessment.id);
+
+        } catch (err) {
+          // Fallback: If insert failed (likely due to missing columns), try inserting without new columns
+          console.warn("Failed to insert with reporting period, falling back:", err);
+          const { data: fallbackAssessment } = await supabase
+            .from('assessments')
+            .insert([{ user_id: userId, submission_data: {} }])
+            .select()
+            .single();
+          if (fallbackAssessment) setActiveAssessmentId(fallbackAssessment.id);
+        }
+      }
+    } finally {
+      isCreatingAssessmentRef.current = false;
+    }
+  }
+
 
   const allSections = [
     { id: 'intro', title: 'Introduction', icon: '📋' },
@@ -70,9 +193,9 @@ const FoodSecurityAssessment = () => {
   const sectionFields = {
     intro: ['statisticalRegion', 'district', 'subCounty', 'officialName', 'officialTitle'],
     crop: ['normalYearEvents', 'lastSeasonEvents', 'normalYearLevels', 'currentYearLevels', 'cropPerformance', 'landSizeByHousehold', 'cropYields', 'cropUtilization', 'foodStocks', 'stapleAvailability', 'mealsPerDay', 'poorPerformanceReasons', 'subCountyRanking', 'affectedParishes', 'foodSecurityRanking', 'productionConstraints', 'diseaseOutbreaks', 'copingStrategies'],
-    livestock: ['livestockConditions', 'livestockNumbers', 'livestockMigration', 'livestockMarket', 'livestockDiseases', 'livestockInterventions', 'drugAvailability', 'milkProduction', 'waterSources'],
+    livestock: ['livestockConditions', 'livestockNumbers', 'livestockMigration', 'livestockMarketConditions', 'livestockOutbreaks', 'livestockInterventions', 'drugAvailability', 'milkProduction', 'waterSources'],
     fisheries: ['fishingHouseholds', 'fishingActivityChange', 'waterBodies', 'fishCatch', 'fishUtilization', 'fishPonds', 'stockedPonds', 'fishSpecies', 'aquacultureHarvest', 'fishingChallenges'],
-    markets: ['marketAssessments']
+    markets: ['markets']
   };
 
   const calculateSectionProgress = (sectionId) => {
@@ -119,6 +242,27 @@ const FoodSecurityAssessment = () => {
           filledCount++;
         }
       });
+    } else if (sectionId === 'markets') {
+      const markets = formData.markets || [];
+      // Requirement: At least 2 markets
+      if (markets.length >= 2) {
+        // Check if all markets have basic info filled (name, parish, type)
+        const allMarketsValid = markets.every(m =>
+          m.name &&
+          m.data?.parish &&
+          m.data?.marketType &&
+          m.data?.frequency
+        );
+        if (allMarketsValid) {
+          filledCount = totalFields; // Mark as complete
+        } else {
+          // If 2 markets exist but missing data, give partial credit
+          filledCount = 0.5 * totalFields;
+        }
+      } else if (markets.length > 0) {
+        // Less than 2 markets
+        filledCount = 0.3 * totalFields;
+      }
     } else {
       // Standard calculation for other sections
       fields.forEach(field => {
@@ -137,9 +281,15 @@ const FoodSecurityAssessment = () => {
     return Math.round((filledCount / totalFields) * 100);
   };
 
-  const sections = userRole === 'owner'
-    ? allSections
-    : allSections.filter(s => s.id === userRole);
+  // Collaborators previously only saw their assigned section (stored in `userRole`).
+  // We now allow accepted collaborators to access all sections, while keeping
+  // pending invites gated from the assessment UI.
+  const sections = userRole === 'pending' ? [] : allSections;
+
+  const assignedSection =
+    userRole !== 'owner' && userRole !== 'pending'
+      ? allSections.find(s => s.id === userRole)
+      : null;
 
   useEffect(() => {
     const validateSession = async () => {
@@ -156,7 +306,20 @@ const FoodSecurityAssessment = () => {
 
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       setSession(currentSession);
-      if (currentSession) checkUserPermissions(currentSession.user.id, currentSession.user.email);
+      if (currentSession) {
+        const params = new URLSearchParams(window.location.search);
+        const hasToken = !!params.get('token') || !!sessionStorage.getItem('district_link_token');
+
+        await openDistrictLinkFromUrl();
+
+        // For the new per-district link flow, skip the old owner/collaborator
+        // permission logic when a link token is present, to avoid overriding
+        // the assessment opened by the link.
+        if (!hasToken) {
+          checkUserPermissions(currentSession.user.id, currentSession.user.email);
+        }
+        checkSystemAdmin(currentSession.user.email);
+      }
       setLoadingSession(false);
     };
 
@@ -170,6 +333,45 @@ const FoodSecurityAssessment = () => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  const openDistrictLinkFromUrl = async () => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token') || sessionStorage.getItem('district_link_token');
+
+    // Only act if there is a token in the URL
+    if (!token) return;
+
+    setLinkStatus('processing');
+    setLinkError('');
+    try {
+      const { data, error: rpcError } = await supabase.rpc('open_district_link', { link_token: token });
+      if (rpcError) throw rpcError;
+
+      const linkInfo = Array.isArray(data) ? data[0] : data;
+      if (!linkInfo?.assessment_id) {
+        throw new Error('No assessment returned for this link.');
+      }
+
+      setActiveAssessmentId(linkInfo.assessment_id);
+      setLinkedDistrict(linkInfo.district || null);
+      setUserRole('owner');
+      await loadAssessmentData(linkInfo.assessment_id);
+
+      // Ensure district in local form state matches the linked district
+      if (linkInfo.district) {
+        setFormData(prev => ({ ...prev, district: linkInfo.district }));
+      }
+
+      // Token has been consumed successfully; clear stored token and clean URL (remove query string).
+      sessionStorage.removeItem('district_link_token');
+      const newUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, '', newUrl);
+      setLinkStatus('ready');
+    } catch (err) {
+      setLinkStatus('error');
+      setLinkError(err?.message || String(err));
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -186,7 +388,20 @@ const FoodSecurityAssessment = () => {
   }, []);
 
   const checkUserPermissions = async (userId, email) => {
-    // 1. Always check for pending invites regardless of other roles
+    // If a district link has already opened an assessment for this user,
+    // don't override it with owner/collaborator logic.
+    if (activeAssessmentId) {
+      const { data: notes } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_email', email)
+        .eq('is_read', false)
+        .order('created_at', { ascending: false });
+      if (notes) setNotifications(notes);
+      return;
+    }
+
+    // 1. Check legacy collaborator invites (kept for backward compatibility)
     const { data: allInvites } = await supabase
       .from('assessment_collaborators')
       .select('*')
@@ -198,11 +413,13 @@ const FoodSecurityAssessment = () => {
       setPendingInvite(pending);
     }
 
-    // 2. Check if the user is the owner of any assessment
+    // 2. Check if the user is the owner of any assessment for the CURRENT period
     const { data: ownAssessment } = await supabase
       .from('assessments')
       .select('id')
       .eq('user_id', userId)
+      .eq('reporting_year', reportingInfo.year)
+      .eq('reporting_period', reportingInfo.period)
       .maybeSingle();
 
     if (ownAssessment) {
@@ -221,8 +438,9 @@ const FoodSecurityAssessment = () => {
       } else if (pending) {
         setUserRole('pending');
       } else {
-        setUserRole('owner');
-        createOrGetDraftAssessment(userId);
+        // No legacy owner or collaborator; by default show restricted state
+        // unless a district link has already opened an assessment (handled above).
+        setUserRole('unauthorized');
       }
     }
 
@@ -233,6 +451,15 @@ const FoodSecurityAssessment = () => {
       .eq('is_read', false)
       .order('created_at', { ascending: false });
     if (notes) setNotifications(notes);
+  };
+
+  const checkSystemAdmin = (email) => {
+    if (!email) return;
+    const lowerEmail = email.toLowerCase();
+    // Check if email is in the allowed list
+    if (SYSTEM_ADMIN_EMAILS.some(e => e.toLowerCase() === lowerEmail)) {
+      setIsSystemAdmin(true);
+    }
   };
 
   const markAllAsRead = async () => {
@@ -258,39 +485,24 @@ const FoodSecurityAssessment = () => {
     }
   };
 
-  const createOrGetDraftAssessment = async (userId) => {
-    if (isCreatingAssessmentRef.current || activeAssessmentId) return;
-    isCreatingAssessmentRef.current = true;
 
-    try {
-      const { data } = await supabase
-        .from('assessments')
-        .select('id, submission_data')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (data) {
-        setActiveAssessmentId(data.id);
-        if (data.submission_data) setFormData(prev => ({ ...prev, ...data.submission_data }));
-      } else {
-        const { data: newAssessment } = await supabase
-          .from('assessments')
-          .insert([{ user_id: userId, submission_data: {} }])
-          .select()
-          .single();
-        if (newAssessment) setActiveAssessmentId(newAssessment.id);
-      }
-    } finally {
-      isCreatingAssessmentRef.current = false;
-    }
-  }
 
   const loadAssessmentData = async (id) => {
     const { data } = await supabase.from('assessments').select('submission_data').eq('id', id).single();
     if (data && data.submission_data) {
-      setFormData(prev => ({ ...prev, ...data.submission_data }));
+      const submissionData = data.submission_data;
+
+      // Data Migration: If we have old marketAssessments but no markets array, migrate it
+      if (submissionData.marketAssessments && (!submissionData.markets || submissionData.markets.length === 0)) {
+        // Simple migration: if marketAssessments was an object, we just start fresh with markets 
+        // to avoid complex mapping of unknown structures
+        submissionData.markets = [
+          { id: 1, name: 'Market 1', data: {} },
+          { id: 2, name: 'Market 2', data: {} }
+        ];
+      }
+
+      setFormData(prev => ({ ...prev, ...submissionData }));
     }
   }
 
@@ -315,15 +527,17 @@ const FoodSecurityAssessment = () => {
   const submitAssessment = async () => {
     if (!session) return;
 
-    // 1. Check completion for all assigned sections
-    const incompleteSections = sections
-      .filter(s => s.id !== 'review' && sectionFields[s.id])
-      .filter(s => calculateSectionProgress(s.id) < 100);
+    // Only the owner must meet full completion before final submission.
+    // Collaborators can save changes without being blocked by overall completeness.
+    if (userRole === 'owner') {
+      const incompleteSections = sections
+        .filter(s => s.id !== 'review' && sectionFields[s.id])
+        .filter(s => calculateSectionProgress(s.id) < 100);
 
-    // Only owners are blocked by the 100% completion rule
-    if (userRole === 'owner' && incompleteSections.length > 0) {
-      error(`Cannot submit: The following sections are incomplete: ${incompleteSections.map(s => s.title).join(', ')}`);
-      return;
+      if (incompleteSections.length > 0) {
+        error(`Cannot submit: The following sections are incomplete: ${incompleteSections.map(s => s.title).join(', ')}`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -361,6 +575,15 @@ const FoodSecurityAssessment = () => {
 
   if (!session) return <Auth />;
 
+  // Render Admin Panel if in admin mode
+  if (isAdminMode) {
+    // Security check: Only allow if system admin
+    if (!isSystemAdmin && !loadingSession) {
+      exitAdminMode(); // Kick them out if not authorized
+      return null;
+    }
+    return <AdminPanel session={session} onExit={exitAdminMode} />;
+  }
 
 
   const renderView = () => {
@@ -380,6 +603,16 @@ const FoodSecurityAssessment = () => {
         );
       case 'assessment':
       default:
+        if (userRole === 'unauthorized') {
+          return (
+            <div className="bg-white rounded-xl shadow-lg p-8 text-center text-gray-700">
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Access restricted</h3>
+              <p className="text-sm text-gray-600">
+                You need a district invite (DPO) or a collaborator invite to access this assessment.
+              </p>
+            </div>
+          );
+        }
         if (sections.length === 0) {
           return (
             <div className="bg-white rounded-xl shadow-lg p-8 text-center text-gray-600">
@@ -391,12 +624,19 @@ const FoodSecurityAssessment = () => {
         const sectionId = sections[currentSection]?.id;
         return (
           <div className="bg-white rounded-xl shadow-lg p-8">
-            {sectionId === 'intro' && <IntroSection formData={formData} updateFormData={updateFormData} />}
+            {sectionId === 'intro' && (
+              <IntroSection
+                formData={formData}
+                updateFormData={updateFormData}
+                reportingInfo={reportingInfo}
+                lockedDistrict={linkedDistrict}
+              />
+            )}
             {sectionId === 'crop' && <CropSection formData={formData} updateFormData={updateFormData} />}
             {sectionId === 'livestock' && <LivestockSection formData={formData} updateFormData={updateFormData} />}
             {sectionId === 'fisheries' && <FisheriesSection formData={formData} updateFormData={updateFormData} />}
             {sectionId === 'markets' && <MarketsSection formData={formData} updateFormData={updateFormData} />}
-            {sectionId === 'review' && <ReviewSection formData={formData} sections={allSections} />}
+            {sectionId === 'review' && <ReviewSection formData={formData} sections={allSections} calculateProgress={calculateSectionProgress} />}
           </div>
         );
     }
@@ -496,6 +736,11 @@ const FoodSecurityAssessment = () => {
                     <button onClick={() => { setCurrentView('assessment'); setIsUserMenuOpen(false); }} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-3 transition-colors">
                       <ClipboardList className="w-4 h-4" /> Assessment Form
                     </button>
+                    {isSystemAdmin && (
+                      <button onClick={() => { enterAdminMode(); setIsUserMenuOpen(false); }} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-3 transition-colors">
+                        <Database className="w-4 h-4" /> Admin Dashboard
+                      </button>
+                    )}
                     <div className="h-px bg-gray-50 my-1"></div>
                     <button onClick={() => supabase.auth.signOut()} className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors">
                       <LogOut className="w-4 h-4" /> Sign Out
@@ -568,6 +813,14 @@ const FoodSecurityAssessment = () => {
                     <Users className="w-5 h-5" /> Team Management
                   </button>
                 )}
+                {isSystemAdmin && (
+                  <button
+                    onClick={() => { enterAdminMode(); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl font-bold text-sm transition-all ${currentView === 'admin' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    <Database className="w-5 h-5" /> Admin Dashboard
+                  </button>
+                )}
                 <div className="h-px bg-gray-100 my-2 mx-3"></div>
                 <button
                   onClick={() => supabase.auth.signOut()}
@@ -638,17 +891,21 @@ const FoodSecurityAssessment = () => {
           </div>
         )}
 
-        {currentView === 'assessment' && (
+        {currentView === 'assessment' && sections.length > 0 && (
           <div className="mb-8">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-sm font-bold text-blue-600 uppercase tracking-widest">
                 <LayoutGrid className="w-4 h-4" />
-                {userRole === 'owner' ? (
-                  <span>Section {currentSection + 1} of {sections.length}</span>
-                ) : (
-                  <span>Assigned Section: {sections[currentSection]?.title}</span>
-                )}
+                <span>
+                  Section {currentSection + 1} of {sections.length}
+                  {userRole !== 'owner' && assignedSection?.title ? ` • Assigned: ${assignedSection.title}` : ''}
+                </span>
               </div>
+              { (formData.district || linkedDistrict) && (
+                <div className="text-xs md:text-sm font-bold text-gray-500">
+                  District: <span className="text-gray-900">{formData.district || linkedDistrict}</span>
+                </div>
+              )}
               <div className="text-sm font-bold text-gray-500">
                 {userRole === 'owner'
                   ? `${Math.round(((currentSection + 1) / sections.length) * 100)}% OVERALL`

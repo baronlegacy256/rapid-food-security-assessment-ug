@@ -1,47 +1,24 @@
 import React from 'react';
 import { Save, CheckCircle2, AlertTriangle, AlertCircle } from 'lucide-react';
 
-const ReviewSection = ({ formData, sections }) => {
+const ReviewSection = ({ formData, sections, calculateProgress }) => {
     const getMissingSections = () => {
         const missing = [];
-        // Intro Check
-        if (!formData.district || !formData.subCounty) {
-            missing.push({ id: 'intro', name: 'Introduction', reason: 'Missing District or Sub-county' });
-        }
 
-        // Crop Check (Proxy: Normal Year Events or Crop Performance)
-        const hasCropData = Object.keys(formData.normalYearEvents).length > 0 || Object.keys(formData.cropPerformance).length > 0;
-        // Check if diseaseOutbreaks is properly filled (either 'no' or 'yes' with data)
-        const hasOutbreakData = formData.diseaseOutbreaks?.hasOutbreak === 'no' ||
-            (formData.diseaseOutbreaks?.hasOutbreak === 'yes' && Object.keys(formData.diseaseOutbreaks).length > 1);
+        sections.slice(0, -1).forEach(section => {
+            const progress = calculateProgress ? calculateProgress(section.id) : 0;
+            if (progress < 100) {
+                let reason = 'Incomplete';
+                if (progress === 0) reason = 'No data entered';
+                else reason = `${Math.round(progress)}% Complete`;
 
-        if (!hasCropData) {
-            missing.push({ id: 'crop', name: 'Crop Production', reason: 'No data entered' });
-        }
-
-        // Livestock Check
-        const hasLivestockData = Object.keys(formData.livestockConditions).length > 0 || Object.keys(formData.livestockNumbers).length > 0;
-        if (!hasLivestockData) {
-            missing.push({ id: 'livestock', name: 'Livestock', reason: 'No data entered' });
-        }
-
-        // Fisheries Check
-        const hasFisheriesData = formData.fishingHouseholds || formData.waterBodies !== '';
-        // If waterBodies is 'no', we don't need fishCatch/fishUtilization data
-        const needsWaterBodyData = formData.waterBodies === 'yes';
-        const hasWaterBodyData = needsWaterBodyData ?
-            (Object.keys(formData.fishCatch).length > 0 || Object.keys(formData.fishUtilization).length > 0) :
-            true; // Not needed if no water bodies
-
-        if (!hasFisheriesData || !hasWaterBodyData) {
-            missing.push({ id: 'fisheries', name: 'Fisheries', reason: 'No data entered' });
-        }
-
-        // Markets Check
-        const hasMarketData = Object.keys(formData.marketAssessments).length > 0;
-        if (!hasMarketData) {
-            missing.push({ id: 'markets', name: 'Markets', reason: 'No data entered' });
-        }
+                missing.push({
+                    id: section.id,
+                    name: section.title,
+                    reason: reason
+                });
+            }
+        });
 
         return missing;
     };
