@@ -253,15 +253,15 @@ begin
   end if;
 
   -- Ensure link exists and get token
-  select token
+  select edl.token
     into t
-  from ensure_district_link(
+  from public.ensure_district_link(
     p_district_name,
     p_dpo_email,
     p_reporting_year,
     p_reporting_period,
     p_reporting_frequency
-  );
+  ) edl;
 
   if t is null then
     raise exception 'Failed to generate district link';

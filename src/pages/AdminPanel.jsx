@@ -6,6 +6,12 @@ import {
     BarChart3, TrendingUp, MapPin, Shield
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
+import { flattenIntroData } from '../utils/flatteners/intro';
+import { flattenCropData } from '../utils/flatteners/crop';
+import { flattenLivestockData } from '../utils/flatteners/livestock';
+import { flattenFisheriesData } from '../utils/flatteners/fisheries';
+import { flattenMarketsData } from '../utils/flatteners/markets';
 import DistrictDpoDirectory from '../components/admin/DistrictDpoDirectory';
 
 const AdminPanel = ({ session, onExit }) => {
@@ -110,366 +116,86 @@ const AdminPanel = ({ session, onExit }) => {
         }
     };
 
-    // Flattening functions (same as AdminDashboard)
-    const flattenIntroData = (assessment) => {
-        const data = assessment.submission_data || {};
-        return {
-            assessment_id: assessment.id,
-            user_id: assessment.user_id,
-            created_at: assessment.created_at,
-            updated_at: assessment.updated_at,
-            reporting_year: assessment.reporting_year,
-            reporting_period: assessment.reporting_period,
-            statistical_region: data.statisticalRegion || '',
-            district: data.district || '',
-            sub_county: data.subCounty || '',
-            official_name: data.officialName || '',
-            official_title: data.officialTitle || ''
-        };
-    };
+    // Build workbook using shared flatteners (covers all form fields)
+    const buildWorkbookForAssessments = (assessmentList) => {
+        const wb = XLSX.utils.book_new();
 
-    const flattenCropData = (assessment) => {
-        const data = assessment.submission_data || {};
-        const rows = [];
-
-        if (data.cropPerformance) {
-            Object.entries(data.cropPerformance).forEach(([crop, performance]) => {
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    category: 'Crop Performance',
-                    crop_name: crop,
-                    value: performance,
-                    metric: 'performance_rating'
-                });
-            });
+        const introData = assessmentList.map(flattenIntroData);
+        if (introData.length > 0) {
+            const introSheet = XLSX.utils.json_to_sheet(introData);
+            XLSX.utils.book_append_sheet(wb, introSheet, 'Introduction');
         }
 
-        if (data.cropYields) {
-            Object.entries(data.cropYields).forEach(([crop, yield_value]) => {
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    category: 'Crop Yields',
-                    crop_name: crop,
-                    value: yield_value,
-                    metric: 'yield_amount'
-                });
-            });
+        const cropData = assessmentList.flatMap(flattenCropData);
+        if (cropData.length > 0) {
+            const cropSheet = XLSX.utils.json_to_sheet(cropData);
+            XLSX.utils.book_append_sheet(wb, cropSheet, 'Crop Production');
         }
 
-        if (data.landSizeByHousehold) {
-            Object.entries(data.landSizeByHousehold).forEach(([category, size]) => {
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    category: 'Land Size',
-                    crop_name: category,
-                    value: size,
-                    metric: 'hectares'
-                });
-            });
+        const livestockData = assessmentList.flatMap(flattenLivestockData);
+        if (livestockData.length > 0) {
+            const livestockSheet = XLSX.utils.json_to_sheet(livestockData);
+            XLSX.utils.book_append_sheet(wb, livestockSheet, 'Livestock');
         }
 
-        if (data.cropUtilization) {
-            Object.entries(data.cropUtilization).forEach(([crop, utilization]) => {
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    category: 'Crop Utilization',
-                    crop_name: crop,
-                    value: utilization,
-                    metric: 'utilization_type'
-                });
-            });
+        const fisheriesData = assessmentList.flatMap(flattenFisheriesData);
+        if (fisheriesData.length > 0) {
+            const fisheriesSheet = XLSX.utils.json_to_sheet(fisheriesData);
+            XLSX.utils.book_append_sheet(wb, fisheriesSheet, 'Fisheries');
         }
 
-        return rows;
-    };
-
-    const flattenLivestockData = (assessment) => {
-        const data = assessment.submission_data || {};
-        const rows = [];
-
-        if (data.livestockNumbers) {
-            Object.entries(data.livestockNumbers).forEach(([animal, count]) => {
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    category: 'Livestock Numbers',
-                    animal_type: animal,
-                    value: count,
-                    metric: 'count'
-                });
-            });
+        const marketsData = assessmentList.flatMap(flattenMarketsData);
+        if (marketsData.length > 0) {
+            const marketsSheet = XLSX.utils.json_to_sheet(marketsData);
+            XLSX.utils.book_append_sheet(wb, marketsSheet, 'Markets & Trade');
         }
 
-        if (data.livestockConditions) {
-            Object.entries(data.livestockConditions).forEach(([animal, condition]) => {
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    category: 'Livestock Conditions',
-                    animal_type: animal,
-                    value: condition,
-                    metric: 'condition_rating'
-                });
-            });
-        }
-
-        if (data.milkProduction) {
-            Object.entries(data.milkProduction).forEach(([metric, value]) => {
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    category: 'Milk Production',
-                    animal_type: 'Dairy',
-                    value: value,
-                    metric: metric
-                });
-            });
-        }
-
-        return rows;
-    };
-
-    const flattenFisheriesData = (assessment) => {
-        const data = assessment.submission_data || {};
-        const rows = [];
-
-        if (data.fishCatch) {
-            Object.entries(data.fishCatch).forEach(([species, catch_amount]) => {
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    category: 'Fish Catch',
-                    species: species,
-                    value: catch_amount,
-                    metric: 'catch_volume'
-                });
-            });
-        }
-
-        if (data.fishSpecies) {
-            Object.entries(data.fishSpecies).forEach(([species, data_value]) => {
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    category: 'Fish Species',
-                    species: species,
-                    value: data_value,
-                    metric: 'species_data'
-                });
-            });
-        }
-
-        rows.push({
-            assessment_id: assessment.id,
-            district: data.district,
-            category: 'Fisheries Overview',
-            species: 'General',
-            value: data.fishingHouseholds || '',
-            metric: 'fishing_households'
-        });
-
-        rows.push({
-            assessment_id: assessment.id,
-            district: data.district,
-            category: 'Fisheries Overview',
-            species: 'General',
-            value: data.waterBodies || '',
-            metric: 'water_bodies_present'
-        });
-
-        return rows;
-    };
-
-    const flattenMarketsData = (assessment) => {
-        const data = assessment.submission_data || {};
-        const rows = [];
-
-        if (data.markets && Array.isArray(data.markets)) {
-            data.markets.forEach((market, index) => {
-                const marketData = market.data || {};
-
-                rows.push({
-                    assessment_id: assessment.id,
-                    district: data.district,
-                    market_name: market.name || `Market ${index + 1}`,
-                    parish: marketData.parish || '',
-                    market_type: marketData.marketType || '',
-                    frequency: marketData.frequency || '',
-                    respondent: marketData.respondent || '',
-                    category: 'Market Info',
-                    item: 'Basic Info',
-                    value: '',
-                    metric: 'general'
-                });
-
-                Object.entries(marketData).forEach(([key, value]) => {
-                    if (key.startsWith('commodity_')) {
-                        const parts = key.split('_');
-                        const itemName = parts.slice(1, -1).join(' ');
-                        const metric = parts[parts.length - 1];
-
-                        rows.push({
-                            assessment_id: assessment.id,
-                            district: data.district,
-                            market_name: market.name,
-                            parish: marketData.parish || '',
-                            market_type: marketData.marketType || '',
-                            frequency: marketData.frequency || '',
-                            respondent: marketData.respondent || '',
-                            category: 'Commodity',
-                            item: itemName,
-                            value: value,
-                            metric: metric
-                        });
-                    }
-
-                    if (key.startsWith('livestock_')) {
-                        const parts = key.split('_');
-                        const itemName = parts.slice(1, -1).join(' ');
-                        const metric = parts[parts.length - 1];
-
-                        rows.push({
-                            assessment_id: assessment.id,
-                            district: data.district,
-                            market_name: market.name,
-                            parish: marketData.parish || '',
-                            market_type: marketData.marketType || '',
-                            frequency: marketData.frequency || '',
-                            respondent: marketData.respondent || '',
-                            category: 'Livestock',
-                            item: itemName,
-                            value: value,
-                            metric: metric
-                        });
-                    }
-
-                    if (key.startsWith('change_')) {
-                        const parts = key.split('_');
-                        const itemName = parts.slice(1, -1).join(' ');
-                        const metric = parts[parts.length - 1];
-
-                        rows.push({
-                            assessment_id: assessment.id,
-                            district: data.district,
-                            market_name: market.name,
-                            parish: marketData.parish || '',
-                            market_type: marketData.marketType || '',
-                            frequency: marketData.frequency || '',
-                            respondent: marketData.respondent || '',
-                            category: 'Price Change',
-                            item: itemName,
-                            value: value,
-                            metric: metric
-                        });
-                    }
-
-                    if (key.startsWith('access_')) {
-                        const parts = key.split('_');
-                        const itemName = parts.slice(1, -1).join(' ');
-                        const metric = parts[parts.length - 1];
-
-                        rows.push({
-                            assessment_id: assessment.id,
-                            district: data.district,
-                            market_name: market.name,
-                            parish: marketData.parish || '',
-                            market_type: marketData.marketType || '',
-                            frequency: marketData.frequency || '',
-                            respondent: marketData.respondent || '',
-                            category: 'Market Access',
-                            item: itemName,
-                            value: value,
-                            metric: metric
-                        });
-                    }
-
-                    if (key.startsWith('transport_')) {
-                        const parts = key.split('_');
-                        const itemName = parts.slice(1, -1).join(' ');
-                        const metric = parts[parts.length - 1];
-
-                        rows.push({
-                            assessment_id: assessment.id,
-                            district: data.district,
-                            market_name: market.name,
-                            parish: marketData.parish || '',
-                            market_type: marketData.marketType || '',
-                            frequency: marketData.frequency || '',
-                            respondent: marketData.respondent || '',
-                            category: 'Transport',
-                            item: itemName,
-                            value: value,
-                            metric: metric
-                        });
-                    }
-
-                    if (key.startsWith('labour_')) {
-                        rows.push({
-                            assessment_id: assessment.id,
-                            district: data.district,
-                            market_name: market.name,
-                            parish: marketData.parish || '',
-                            market_type: marketData.marketType || '',
-                            frequency: marketData.frequency || '',
-                            respondent: marketData.respondent || '',
-                            category: 'Labour Market',
-                            item: key.replace('labour_', ''),
-                            value: value,
-                            metric: 'labour_data'
-                        });
-                    }
-                });
-            });
-        }
-
-        return rows;
+        return wb;
     };
 
     const exportToExcel = async () => {
         setExporting(true);
         try {
-            let filteredData = [...filteredAssessments];
+            // If specific assessments are selected, export only those; otherwise export all filtered
+            const exportList = selectedAssessments.length > 0
+                ? filteredAssessments.filter(a => selectedAssessments.includes(a.id))
+                : [...filteredAssessments];
 
-            const wb = XLSX.utils.book_new();
-
-            const introData = filteredData.map(flattenIntroData);
-            const introSheet = XLSX.utils.json_to_sheet(introData);
-            XLSX.utils.book_append_sheet(wb, introSheet, 'Introduction');
-
-            const cropData = filteredData.flatMap(flattenCropData);
-            if (cropData.length > 0) {
-                const cropSheet = XLSX.utils.json_to_sheet(cropData);
-                XLSX.utils.book_append_sheet(wb, cropSheet, 'Crop Production');
+            if (exportList.length === 0) {
+                alert('No assessments to export. Adjust your filters or selection.');
+                return;
             }
 
-            const livestockData = filteredData.flatMap(flattenLivestockData);
-            if (livestockData.length > 0) {
-                const livestockSheet = XLSX.utils.json_to_sheet(livestockData);
-                XLSX.utils.book_append_sheet(wb, livestockSheet, 'Livestock');
-            }
-
-            const fisheriesData = filteredData.flatMap(flattenFisheriesData);
-            if (fisheriesData.length > 0) {
-                const fisheriesSheet = XLSX.utils.json_to_sheet(fisheriesData);
-                XLSX.utils.book_append_sheet(wb, fisheriesSheet, 'Fisheries');
-            }
-
-            const marketsData = filteredData.flatMap(flattenMarketsData);
-            if (marketsData.length > 0) {
-                const marketsSheet = XLSX.utils.json_to_sheet(marketsData);
-                XLSX.utils.book_append_sheet(wb, marketsSheet, 'Markets & Trade');
-            }
-
+            const zip = new JSZip();
             const timestamp = new Date().toISOString().split('T')[0];
-            const filename = `Food_Security_Assessment_${timestamp}.xlsx`;
 
-            XLSX.writeFile(wb, filename);
+            exportList.forEach((assessment) => {
+                const wb = buildWorkbookForAssessments([assessment]);
+                const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
 
-            alert(`Successfully exported ${filteredData.length} assessments to Excel!`);
+                const district = (assessment.submission_data?.district || 'District').toString();
+                const safeDistrict = district.replace(/[^a-z0-9]/gi, '_') || 'District';
+                const filename = `${safeDistrict}_Assessment_${assessment.id}_${timestamp}.xlsx`;
+
+                zip.file(filename, excelBuffer);
+            });
+
+            const zipBlob = await zip.generateAsync({
+                type: 'blob',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 6 }
+            });
+
+            const zipFilename = `Food_Security_Assessments_${timestamp}.zip`;
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(zipBlob);
+            link.download = zipFilename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+
+            alert(`Successfully exported ${exportList.length} assessment file(s) in a ZIP archive.\n\nFile: ${zipFilename}`);
         } catch (err) {
             console.error('Export error:', err);
             alert('Error exporting to Excel: ' + err.message);
@@ -934,10 +660,10 @@ const AdminPanel = ({ session, onExit }) => {
                         </div>
 
                         <div className="bg-white rounded-xl p-6 shadow-md border border-gray-100">
-                            <h3 className="text-lg font-bold text-gray-900 mb-4">Export to Excel</h3>
+                            <h3 className="text-lg font-bold text-gray-900 mb-4">Export to Excel (ZIP)</h3>
                             <p className="text-sm text-gray-600 mb-6">
-                                Download {filteredAssessments.length} assessment(s) as an Excel file with separate sheets for each section.
-                                The data is flattened and optimized for Power BI analysis.
+                                Download each assessment as its own Excel file (with sheets for Introduction, Crop Production, Livestock, Fisheries, Markets &amp; Trade), bundled together in a single ZIP.
+                                All fields from the form are flattened, following the same structure as the offline Python export, and optimized for Power BI analysis.
                             </p>
 
                             <button
@@ -953,7 +679,9 @@ const AdminPanel = ({ session, onExit }) => {
                                 ) : (
                                     <>
                                         <Download className="w-5 h-5" />
-                                        Export {filteredAssessments.length} Assessment(s) to Excel
+                                        {selectedAssessments.length > 0
+                                            ? `Export ${selectedAssessments.length} Selected Assessment(s)`
+                                            : `Export ${filteredAssessments.length} Assessment(s) to Excel`}
                                     </>
                                 )}
                             </button>

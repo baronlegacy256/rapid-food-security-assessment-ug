@@ -19,21 +19,30 @@ export const flattenLivestockData = (assessment) => {
 
     livestockSections.forEach(sectionName => {
         const sectionValue = data[sectionName];
-        if (!sectionValue) return;
+        if (sectionValue === undefined || sectionValue === null || sectionValue === '') return;
 
-        if (typeof sectionValue === 'object') {
+        const categoryLabel = sectionName
+            .replace(/([A-Z])/g, ' $1')
+            .trim()
+            .replace(/^./, str => str.toUpperCase());
+
+        if (typeof sectionValue === 'object' && !Array.isArray(sectionValue)) {
             Object.entries(sectionValue).forEach(([key, value]) => {
-                // Skip empty values to keep the export clean
                 if (value === '' || value === null || value === undefined) return;
 
                 rows.push({
                     ...base,
-                    category: sectionName.replace(/([A-Z])/g, ' $1').trim()
-                        .replace(/^./, str => str.toUpperCase()), // Convert camelCase to Space Case
-                    item: key.replace(/_/g, ' ')
-                        .replace(/\b\w/g, l => l.toUpperCase()), // Human readable keys (e.g. in_status -> In Status)
-                    value: value
+                    category: categoryLabel,
+                    item: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                    value: Array.isArray(value) ? value.join(', ') : (typeof value === 'object' ? JSON.stringify(value) : value)
                 });
+            });
+        } else {
+            rows.push({
+                ...base,
+                category: categoryLabel,
+                item: 'Value',
+                value: Array.isArray(sectionValue) ? sectionValue.join(', ') : sectionValue
             });
         }
     });
