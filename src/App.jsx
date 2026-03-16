@@ -274,94 +274,69 @@ const FoodSecurityAssessment = () => {
     isCreatingAssessmentRef.current = true;
 
     try {
-      const { data, error: fetchError } = await supabase
-        .from('assessments')
-        .select('id, submission_data, district')
-        .eq('user_id', userId)
-        .eq('reporting_year', reportingInfo.year)
-        .eq('reporting_period', reportingInfo.period)
-        .maybeSingle();
-
-      if (fetchError && fetchError.message?.includes("column")) {
-        console.warn("Reporting columns not found, falling back to legacy mode");
-        const { data: legacyData } = await supabase
-          .from('assessments')
-          .select('id, submission_data')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(1)
+      // 1. Identify the user's district from the directory
+      let assignedDistrict = null;
+      try {
+        const { data: directoryData } = await supabase
+          .from('district_dpo_directory')
+          .select('district')
+          .eq('email', session?.user?.email)
           .maybeSingle();
+        if (directoryData?.district) assignedDistrict = directoryData.district;
+      } catch (e) { }
 
-        if (legacyData) {
-          setActiveAssessmentId(legacyData.id);
-          if (legacyData.submission_data) {
-            setFormData(prev => ({ ...prev, ...legacyData.submission_data }));
-          }
-          return;
-        }
+      // 2. Try to find an existing assessment for this district (shared by all users of that district)
+      let query = supabase.from('assessments').select('id, submission_data, district');
+
+      if (assignedDistrict) {
+        query = query.eq('district', assignedDistrict);
+      } else {
+        query = query.eq('user_id', userId);
       }
 
-      if (data) {
-        setActiveAssessmentId(data.id);
-        await loadAssessmentData(data.id);
-      } else {
-        // Try to find a pre-assigned district from the directory
-        let assignedDistrict = null;
-        try {
-          const { data: directoryData } = await supabase
-            .from('district_dpo_directory')
-            .select('district')
-            .eq('email', session?.user?.email)
-            .maybeSingle();
+      const { data: existingAsmnt } = await query
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-          if (directoryData?.district) {
-            assignedDistrict = directoryData.district;
-            setLinkedDistrict(assignedDistrict);
+      if (existingAsmnt) {
+        console.log("Found existing assessment:", existingAsmnt.id);
+        setActiveAssessmentId(existingAsmnt.id);
+        if (existingAsmnt.submission_data) {
+          setFormData(prev => ({ ...prev, ...existingAsmnt.submission_data }));
+          if (existingAsmnt.district) {
+            setLinkedDistrict(existingAsmnt.district);
+            setFormData(prev => ({ ...prev, district: existingAsmnt.district }));
           }
-        } catch (dirError) {
-          console.warn("Could not fetch district assignment:", dirError);
         }
+        setSaveStatus('saved');
+        return;
+      }
 
-        const newAssessmentData = {
+      // 3. If none exists, create a new one
+      const { data: newAssessment, error: insertError } = await supabase
+        .from('assessments')
+        .insert([{
           user_id: userId,
           submission_data: {},
-          district: assignedDistrict
-        };
+          district: assignedDistrict,
+          status: 'draft'
+        }])
+        .select()
+        .single();
 
-        try {
-          const { data: newAssessment, error: insertError } = await supabase
-            .from('assessments')
-            .insert([{
-              ...newAssessmentData,
-              reporting_year: reportingInfo.year,
-              reporting_period: reportingInfo.period,
-              reporting_frequency: REPORTING_CONFIG.defaultFrequency
-            }])
-            .select()
-            .single();
+      if (insertError) throw insertError;
 
-          if (insertError) throw insertError;
-          if (newAssessment) {
-            setActiveAssessmentId(newAssessment.id);
-            if (assignedDistrict) {
-              // Also update the form data immediately for the UI
-              setFormData(prev => ({ ...prev, district: assignedDistrict }));
-            }
-          }
-        } catch (err) {
-          console.warn("Failed to insert with reporting period, falling back:", err);
-          const { data: fallbackAssessment } = await supabase
-            .from('assessments')
-            .insert([{ user_id: userId, submission_data: {}, district: assignedDistrict }])
-            .select()
-            .single();
-          if (fallbackAssessment) {
-            setActiveAssessmentId(fallbackAssessment.id);
-          }
+      if (newAssessment) {
+        setActiveAssessmentId(newAssessment.id);
+        if (assignedDistrict) {
+          setLinkedDistrict(assignedDistrict);
+          setFormData(prev => ({ ...prev, district: assignedDistrict }));
         }
       }
     } catch (outerErr) {
       console.error("Critical error in createOrGetDraftAssessment:", outerErr);
+      error("Failed to initialize assessment. Data sync failed.");
     } finally {
       isCreatingAssessmentRef.current = false;
     }
@@ -458,7 +433,7 @@ const FoodSecurityAssessment = () => {
     return Math.round((filledCount / totalFields) * 100);
   };
 
-  const sections = userRole === 'pending' ? [] : allSections;
+  const sections = allSections;
 
   const assignedSection =
     userRole !== 'owner' && userRole !== 'pending'
@@ -572,62 +547,15 @@ const FoodSecurityAssessment = () => {
   }, []);
 
   const checkUserPermissions = async (userId, email) => {
+    // If we already have an ID from a link, just load its data.
     if (activeAssessmentId) {
-      const { data: notes } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_email', email)
-        .eq('is_read', false)
-        .order('created_at', { ascending: false });
-      if (notes) setNotifications(notes);
+      loadAssessmentData(activeAssessmentId);
       return;
     }
 
-    const { data: allInvites } = await supabase
-      .from('assessment_collaborators')
-      .select('*')
-      .eq('email', email)
-      .order('created_at', { ascending: false });
-
-    const pending = allInvites?.find(i => i.status === 'pending');
-    if (pending) {
-      setPendingInvite(pending);
-    }
-
-    const { data: ownAssessment } = await supabase
-      .from('assessments')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('reporting_year', reportingInfo.year)
-      .eq('reporting_period', reportingInfo.period)
-      .maybeSingle();
-
-    if (ownAssessment) {
-      setUserRole('owner');
-      setActiveAssessmentId(ownAssessment.id);
-      loadAssessmentData(ownAssessment.id);
-    } else {
-      const accepted = allInvites?.find(i => i.status === 'accepted');
-
-      if (accepted) {
-        setUserRole(accepted.role);
-        setActiveAssessmentId(accepted.assessment_id);
-        loadAssessmentData(accepted.assessment_id);
-      } else if (pending) {
-        setUserRole('pending');
-      } else {
-        setUserRole('owner');
-        await createOrGetDraftAssessment(userId);
-      }
-    }
-
-    const { data: notes } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_email', email)
-      .eq('is_read', false)
-      .order('created_at', { ascending: false });
-    if (notes) setNotifications(notes);
+    // Otherwise, ensure this user has an assessment to work on (by district or UID).
+    setUserRole('owner');
+    await createOrGetDraftAssessment(userId);
   };
 
   const checkSystemAdmin = (email) => {
@@ -638,28 +566,8 @@ const FoodSecurityAssessment = () => {
     }
   };
 
-  const markAllAsRead = async () => {
-    if (!session || notifications.length === 0) return;
-    const { error } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('user_email', session.user.email);
-
-    if (!error) setNotifications([]);
-  };
-
-  const acceptInvite = async () => {
-    try {
-      const { error } = await supabase.from('assessment_collaborators')
-        .update({ status: 'accepted' })
-        .eq('id', pendingInvite.id);
-      if (error) throw error;
-      success('Invite accepted! Redirecting to your section...');
-      window.location.reload();
-    } catch (err) {
-      error(`Error accepting invite: ${err.message}`);
-    }
-  };
+  // Invite logic removed for simplicity. 
+  // Everyone with access uses the link or has 'owner' role.
 
   // ============================================
   // NAVIGATION
