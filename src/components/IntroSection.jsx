@@ -78,17 +78,13 @@ const IntroSection = ({ formData, updateFormData, reportingInfo, lockedDistrict 
 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Sub County</label>
-                    <select
+                    <input
+                        type="text"
                         value={formData.subCounty || ''}
                         onChange={(e) => updateFormData('subCounty', e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                        disabled={!formData.district}
-                    >
-                        <option value="">Select sub county</option>
-                        {subCounties.map(sc => (
-                            <option key={sc} value={sc}>{sc}</option>
-                        ))}
-                    </select>
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
+                        placeholder="Type sub county name"
+                    />
                 </div>
 
                 <div>

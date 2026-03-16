@@ -226,8 +226,8 @@ const FoodSecurityAssessment = () => {
 
       if (dbError) throw dbError;
 
-      if (data?.submission_data) {
-        const submissionData = data.submission_data;
+      if (data) {
+        const submissionData = data.submission_data || {};
 
         // Data Migration: ensure markets array exists for newer UI
         if (submissionData.marketAssessments &&
@@ -238,25 +238,24 @@ const FoodSecurityAssessment = () => {
           ];
         }
 
+        let inferredRegion = '';
         if (data.district) {
           setLinkedDistrict(data.district);
           // Infer region
-          let inferredRegion = '';
           for (const [region, districts] of Object.entries(ugandaDistricts)) {
             if (districts.includes(data.district)) {
               inferredRegion = region;
               break;
             }
           }
-          setFormData(prev => ({
-            ...prev,
-            ...submissionData,
-            district: data.district,
-            statisticalRegion: inferredRegion || prev.statisticalRegion
-          }));
-        } else {
-          setFormData(prev => ({ ...prev, ...submissionData }));
         }
+
+        setFormData(prev => ({
+          ...prev,
+          ...submissionData,
+          district: data.district || submissionData.district || prev.district,
+          statisticalRegion: inferredRegion || submissionData.statisticalRegion || prev.statisticalRegion
+        }));
 
         setSaveStatus('saved');
         setLastSaved(new Date());
@@ -318,19 +317,19 @@ const FoodSecurityAssessment = () => {
           }
         }
 
-        // Load data and merge with database-level fields
-        if (existingAsmnt.submission_data) {
-          setFormData(prev => ({
-            ...prev,
-            ...existingAsmnt.submission_data,
-            district: dbDistrict || existingAsmnt.submission_data.district,
-            statisticalRegion: dbRegion || existingAsmnt.submission_data.statisticalRegion
-          }));
+        const submissionData = existingAsmnt.submission_data || {};
 
-          if (dbDistrict) {
-            setLinkedDistrict(dbDistrict);
-          }
+        setFormData(prev => ({
+          ...prev,
+          ...submissionData,
+          district: dbDistrict || submissionData.district || prev.district,
+          statisticalRegion: dbRegion || submissionData.statisticalRegion || prev.statisticalRegion
+        }));
+
+        if (dbDistrict) {
+          setLinkedDistrict(dbDistrict);
         }
+
         setSaveStatus('saved');
       } else {
         console.warn("No assessment found for this user/district.");
