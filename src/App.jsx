@@ -195,7 +195,7 @@ const FoodSecurityAssessment = () => {
       if (JSON.stringify(prev[field]) === JSON.stringify(value)) return prev;
       return { ...prev, [field]: value };
     });
-    setSaveStatus('syncing'); // Immediate visual feedback
+    setSaveStatus('modified'); // More accurate status
   };
 
   const saveFormDataNow = async (dataOverride) => {
@@ -688,7 +688,7 @@ const FoodSecurityAssessment = () => {
     // Don't sync if we just loaded or are already syncing from another trigger
     const timer = setTimeout(() => {
       saveToCloud(formData, false);
-    }, 2000); // 2 second debounce
+    }, 1000); // 1 second debounce for better responsiveness
 
     return () => clearTimeout(timer);
   }, [formData, activeAssessmentId, session]);
@@ -794,10 +794,17 @@ const FoodSecurityAssessment = () => {
   const SaveStatusIndicator = () => {
     const getStatusConfig = () => {
       switch (saveStatus) {
+        case 'modified':
+          return {
+            icon: <Circle className="w-4 h-4 text-orange-400 fill-orange-400 animate-pulse" />,
+            text: 'Modified...',
+            color: 'text-orange-600',
+            bgColor: 'bg-orange-50'
+          };
         case 'syncing':
           return {
             icon: <Cloud className="w-4 h-4 animate-pulse" />,
-            text: 'Saving and Syncing...',
+            text: 'Saving...',
             color: 'text-blue-600',
             bgColor: 'bg-blue-50'
           };
