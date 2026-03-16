@@ -14,7 +14,10 @@ const FisheriesSection = ({ formData, updateFormData }) => {
     };
 
     const handleObjectChange = (field, key, value) => {
-        updateFormData(field, { ...formData[field], [key]: value });
+        updateFormData(field, prevObj => ({
+            ...(prevObj || {}),
+            [key]: value
+        }));
     };
 
     return (

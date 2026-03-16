@@ -140,6 +140,7 @@ const FoodSecurityAssessment = () => {
     if (!activeAssessmentId) return false;
 
     try {
+      console.log(`[Sync] Saving to Assessment ID: ${activeAssessmentId}`);
       setSaveStatus('syncing');
 
       const payload = {
@@ -190,12 +191,15 @@ const FoodSecurityAssessment = () => {
   // ============================================
   // FORM DATA MANAGEMENT (Supabase only)
   // ============================================
-  const updateFormData = (field, value) => {
+  const updateFormData = (field, valueOrFn) => {
     setFormData(prev => {
-      if (JSON.stringify(prev[field]) === JSON.stringify(value)) return prev;
-      return { ...prev, [field]: value };
+      const oldValue = prev[field];
+      const newValue = typeof valueOrFn === 'function' ? valueOrFn(oldValue) : valueOrFn;
+
+      if (JSON.stringify(oldValue) === JSON.stringify(newValue)) return prev;
+      return { ...prev, [field]: newValue };
     });
-    setSaveStatus('modified'); // More accurate status
+    setSaveStatus('modified');
   };
 
   const saveFormDataNow = async (dataOverride) => {
@@ -244,13 +248,17 @@ const FoodSecurityAssessment = () => {
           }
         }
 
-        setFormData(prev => ({
-          ...prev,
-          ...submissionData,
-          district: data.district || submissionData.district || prev.district,
-          statisticalRegion: inferredRegion || submissionData.statisticalRegion || prev.statisticalRegion
-        }));
+        setFormData(prev => {
+          // Deep merge logic simplified: prioritize DB data but keep local district/region
+          const merged = { ...prev, ...submissionData };
+          return {
+            ...merged,
+            district: data.district || merged.district,
+            statisticalRegion: inferredRegion || merged.statisticalRegion
+          };
+        });
 
+        console.log(`[Load] Successfully loaded assessment ${id}`);
         setSaveStatus('saved');
         setLastSaved(new Date());
       }
@@ -793,6 +801,17 @@ const FoodSecurityAssessment = () => {
   // ============================================
   const SaveStatusIndicator = () => {
     const getStatusConfig = () => {
+      // CRITICAL: If no assessment is loaded, we cannot save to the cloud
+      if (!activeAssessmentId && session && !isAdminMode) return null;
+      if (!activeAssessmentId && isAdminMode && (saveStatus === 'modified' || saveStatus === 'syncing')) {
+        return {
+          icon: <AlertCircle className="w-4 h-4 text-red-500" />,
+          text: 'Not Syncing - No assessment loaded',
+          color: 'text-red-700',
+          bgColor: 'bg-red-50'
+        };
+      }
+
       switch (saveStatus) {
         case 'modified':
           return {
