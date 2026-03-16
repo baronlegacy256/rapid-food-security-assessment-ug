@@ -58,48 +58,39 @@ const IntroSection = ({ formData, updateFormData, reportingInfo, lockedDistrict 
             <div className="grid md:grid-cols-2 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Statistical Region</label>
-                    <select
-                        value={formData.statisticalRegion}
-                        onChange={(e) => {
-                            if (lockedDistrict) return;
-                            updateFormData('statisticalRegion', e.target.value);
-                            updateFormData('district', '');
-                            updateFormData('subCounty', '');
-                        }}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        disabled={!!lockedDistrict}
-                    >
-                        <option value="">Select a region</option>
-                        {Object.keys(ugandaDistricts).map(region => (
-                            <option key={region} value={region}>{region}</option>
-                        ))}
-                    </select>
+                    <input
+                        type="text"
+                        value={formData.statisticalRegion || ''}
+                        readOnly
+                        className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-lg text-gray-600 cursor-not-allowed"
+                        placeholder="Region will be prefilled"
+                    />
                 </div>
 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">District</label>
-                    <SearchableSelect
-                        options={districts || []}
-                        value={lockedDistrict || formData.district}
-                        onChange={(value) => {
-                            if (lockedDistrict) return;
-                            updateFormData('district', value);
-                            updateFormData('subCounty', '');
-                        }}
-                        placeholder="Select a district"
-                        disabled={!!lockedDistrict || !formData.statisticalRegion}
+                    <input
+                        type="text"
+                        value={lockedDistrict || formData.district || ''}
+                        readOnly
+                        className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-lg text-gray-600 cursor-not-allowed"
+                        placeholder="No district assigned"
                     />
                 </div>
 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Sub County</label>
-                    <SearchableSelect
-                        options={subCounties}
-                        value={formData.subCounty}
-                        onChange={(value) => updateFormData('subCounty', value)}
-                        placeholder="Select or type sub county"
+                    <select
+                        value={formData.subCounty || ''}
+                        onChange={(e) => updateFormData('subCounty', e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
                         disabled={!formData.district}
-                    />
+                    >
+                        <option value="">Select sub county</option>
+                        {subCounties.map(sc => (
+                            <option key={sc} value={sc}>{sc}</option>
+                        ))}
+                    </select>
                 </div>
 
                 <div>

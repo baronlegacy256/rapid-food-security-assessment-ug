@@ -131,6 +131,8 @@ const FoodSecurityAssessment = () => {
     markets: []
   });
 
+  const [noAssessmentFound, setNoAssessmentFound] = useState(false);
+
   // ============================================
   // CLOUD SYNC FUNCTIONS
   // ============================================
@@ -272,6 +274,7 @@ const FoodSecurityAssessment = () => {
   const createOrGetDraftAssessment = async (userId) => {
     if (isCreatingAssessmentRef.current || activeAssessmentId) return;
     isCreatingAssessmentRef.current = true;
+    setNoAssessmentFound(false);
 
     try {
       // 1. Identify the user's district from the directory
@@ -285,7 +288,7 @@ const FoodSecurityAssessment = () => {
         if (directoryData?.district) assignedDistrict = directoryData.district;
       } catch (e) { }
 
-      // 2. Try to find an existing assessment for this district (shared by all users of that district)
+      // 2. Try to find an existing assessment for this district or user
       let query = supabase.from('assessments').select('id, submission_data, district');
 
       if (assignedDistrict) {
@@ -310,33 +313,13 @@ const FoodSecurityAssessment = () => {
           }
         }
         setSaveStatus('saved');
-        return;
-      }
-
-      // 3. If none exists, create a new one
-      const { data: newAssessment, error: insertError } = await supabase
-        .from('assessments')
-        .insert([{
-          user_id: userId,
-          submission_data: {},
-          district: assignedDistrict,
-          status: 'draft'
-        }])
-        .select()
-        .single();
-
-      if (insertError) throw insertError;
-
-      if (newAssessment) {
-        setActiveAssessmentId(newAssessment.id);
-        if (assignedDistrict) {
-          setLinkedDistrict(assignedDistrict);
-          setFormData(prev => ({ ...prev, district: assignedDistrict }));
-        }
+      } else {
+        console.warn("No assessment found for this user/district.");
+        setNoAssessmentFound(true);
       }
     } catch (outerErr) {
       console.error("Critical error in createOrGetDraftAssessment:", outerErr);
-      error("Failed to initialize assessment. Data sync failed.");
+      setNoAssessmentFound(true);
     } finally {
       isCreatingAssessmentRef.current = false;
     }
@@ -693,12 +676,30 @@ const FoodSecurityAssessment = () => {
   // ============================================
   // LOADING STATE
   // ============================================
-  if (loadingSession) {
+  if (noAssessmentFound) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-sm text-gray-600">Loading your assessment...</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center border border-red-100">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-red-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Restricted</h2>
+          <p className="text-gray-600 mb-6">
+            We couldn't find an active assessment link for your district.
+            Assessments must be initiated by an administrator.
+          </p>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-500 italic">
+              Please check your email for a direct link or contact the MAAIF admin team.
+            </p>
+            <button
+              onClick={() => supabase.auth.signOut()}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors font-medium"
+            >
+              <LogOut className="w-4 h-4" />
+              Sign Out
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -735,20 +736,13 @@ const FoodSecurityAssessment = () => {
       case 'assessment': {
         if (userRole === 'unauthorized') {
           return (
-            <div className="bg-white rounded-xl shadow-lg p-8 text-center text-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 mb-2">Access restricted</h3>
-              <p className="text-sm text-gray-600">
-                You need a district invite (DPO) or a collaborator invite to access this assessment.
-              </p>
+            <div className="bg-white rounded-xl shadow-lg p-8 text-center text-gray-700 border border-gray-100 italic">
+              Access restricted. Please contact your district administrator.
             </div>
           );
         }
         if (sections.length === 0) {
-          return (
-            <div className="bg-white rounded-xl shadow-lg p-8 text-center text-gray-600">
-              Accept the invite to access your assigned section.
-            </div>
-          );
+          return null; // Should not happen with current logic
         }
 
         const sectionId = sections[currentSection]?.id;
