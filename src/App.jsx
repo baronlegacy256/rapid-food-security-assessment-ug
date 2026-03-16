@@ -305,11 +305,30 @@ const FoodSecurityAssessment = () => {
       if (existingAsmnt) {
         console.log("Found existing assessment:", existingAsmnt.id);
         setActiveAssessmentId(existingAsmnt.id);
+
+        // 3. Force District and Region integration
+        const dbDistrict = existingAsmnt.district;
+        let dbRegion = null;
+        if (dbDistrict) {
+          for (const [region, list] of Object.entries(ugandaDistricts)) {
+            if (list.includes(dbDistrict)) {
+              dbRegion = region;
+              break;
+            }
+          }
+        }
+
+        // Load data and merge with database-level fields
         if (existingAsmnt.submission_data) {
-          setFormData(prev => ({ ...prev, ...existingAsmnt.submission_data }));
-          if (existingAsmnt.district) {
-            setLinkedDistrict(existingAsmnt.district);
-            setFormData(prev => ({ ...prev, district: existingAsmnt.district }));
+          setFormData(prev => ({
+            ...prev,
+            ...existingAsmnt.submission_data,
+            district: dbDistrict || existingAsmnt.submission_data.district,
+            statisticalRegion: dbRegion || existingAsmnt.submission_data.statisticalRegion
+          }));
+
+          if (dbDistrict) {
+            setLinkedDistrict(dbDistrict);
           }
         }
         setSaveStatus('saved');

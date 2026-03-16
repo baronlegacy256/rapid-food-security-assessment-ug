@@ -62,8 +62,7 @@ const IntroSection = ({ formData, updateFormData, reportingInfo, lockedDistrict 
                         type="text"
                         value={formData.statisticalRegion || ''}
                         readOnly
-                        className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-lg text-gray-600 cursor-not-allowed"
-                        placeholder="Region will be prefilled"
+                        className="w-full px-4 py-2 border border-gray-300 bg-gray-50 rounded-lg text-gray-900 font-medium cursor-not-allowed"
                     />
                 </div>
 
@@ -71,10 +70,9 @@ const IntroSection = ({ formData, updateFormData, reportingInfo, lockedDistrict 
                     <label className="block text-sm font-medium text-gray-700 mb-2">District</label>
                     <input
                         type="text"
-                        value={lockedDistrict || formData.district || ''}
+                        value={formData.district || lockedDistrict || ''}
                         readOnly
-                        className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-lg text-gray-600 cursor-not-allowed"
-                        placeholder="No district assigned"
+                        className="w-full px-4 py-2 border border-gray-300 bg-gray-50 rounded-lg text-gray-900 font-medium cursor-not-allowed"
                     />
                 </div>
 
