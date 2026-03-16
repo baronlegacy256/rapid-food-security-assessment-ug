@@ -691,6 +691,11 @@ const FoodSecurityAssessment = () => {
       }
     }
 
+    if (!activeAssessmentId) {
+      error("Cannot submit: No active assessment ID found. Try refreshing the page.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -700,13 +705,29 @@ const FoodSecurityAssessment = () => {
         submittedBy: session.user.email
       };
 
-      const { error: submitError } = await supabase
+      const payload = {
+        submission_data: finalData,
+        last_modified: new Date().toISOString(),
+        status: userRole === 'owner' ? 'submitted' : 'draft'
+      };
+
+      let { error: submitError } = await supabase
         .from('assessments')
-        .update({
-          submission_data: finalData,
-          last_modified: new Date().toISOString()
-        })
+        .update(payload)
         .eq('id', activeAssessmentId);
+
+      // Fallback if there are still schema issues
+      if (submitError && (submitError.message?.includes('column') || submitError.code === '42703')) {
+        console.warn("Schema issue detected, falling back to minimal update");
+        const { error: fallbackError } = await supabase
+          .from('assessments')
+          .update({
+            submission_data: finalData,
+            status: userRole === 'owner' ? 'submitted' : 'draft'
+          })
+          .eq('id', activeAssessmentId);
+        submitError = fallbackError;
+      }
 
       if (submitError) throw submitError;
 
