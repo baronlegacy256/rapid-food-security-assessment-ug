@@ -695,7 +695,7 @@ const FoodSecurityAssessment = () => {
   // ============================================
   // LOADING STATE
   // ============================================
-  if (noAssessmentFound) {
+  if (noAssessmentFound && !isSystemAdmin) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
         <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center border border-red-100">
