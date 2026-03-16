@@ -192,16 +192,10 @@ const FoodSecurityAssessment = () => {
   // ============================================
   const updateFormData = (field, value) => {
     setFormData(prev => {
-      if (prev[field] === value) return prev;
-
-      const newData = { ...prev, [field]: value };
-
-      if (activeAssessmentId) {
-        saveToCloud(newData, true);
-      }
-
-      return newData;
+      if (JSON.stringify(prev[field]) === JSON.stringify(value)) return prev;
+      return { ...prev, [field]: value };
     });
+    setSaveStatus('syncing'); // Immediate visual feedback
   };
 
   const saveFormDataNow = async (dataOverride) => {
@@ -304,6 +298,15 @@ const FoodSecurityAssessment = () => {
       if (existingAsmnt) {
         console.log("Found existing assessment:", existingAsmnt.id);
         setActiveAssessmentId(existingAsmnt.id);
+
+        // CLAIM ASSESSMENT: If this assessment has no user_id (admin created), claim it for this user
+        if (!existingAsmnt.user_id && userId) {
+          console.log("Claiming assessment for user:", userId);
+          await supabase
+            .from('assessments')
+            .update({ user_id: userId })
+            .eq('id', existingAsmnt.id);
+        }
 
         // 3. Force District and Region integration
         const dbDistrict = existingAsmnt.district;
@@ -676,20 +679,19 @@ const FoodSecurityAssessment = () => {
   // ============================================
   // PERIODIC CLOUD SYNC (every 30 seconds if changes exist)
   // ============================================
+  // ============================================
+  // DEBOUNCED AUTO-SAVE
+  // ============================================
   useEffect(() => {
     if (!activeAssessmentId || !session) return;
 
-    const interval = setInterval(() => {
-      const timeSinceLastSync = Date.now() - lastCloudSyncRef.current;
+    // Don't sync if we just loaded or are already syncing from another trigger
+    const timer = setTimeout(() => {
+      saveToCloud(formData, false);
+    }, 2000); // 2 second debounce
 
-      // Sync every 30 seconds if there are changes
-      if (timeSinceLastSync > 30000 && (saveStatus === 'saved' || saveStatus === 'error')) {
-        saveToCloud(formData, false);
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [activeAssessmentId, session, formData, saveStatus]);
+    return () => clearTimeout(timer);
+  }, [formData, activeAssessmentId, session]);
 
   // ============================================
   // LOADING STATE
